@@ -1,0 +1,57 @@
+name: CI/CD Deploy
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set image tag
+        id: vars
+        run: echo "TAG=build-${GITHUB_RUN_NUMBER}" >> $GITHUB_OUTPUT
+
+      - name: Build & Push Frontend
+        run: |
+          docker build -t eventhub-frontend:${{ steps.vars.outputs.TAG }} ./frontend
+          docker tag eventhub-frontend:${{ steps.vars.outputs.TAG }} ${{ secrets.ECR_REGISTRY }}/eventhub-frontend:${{ steps.vars.outputs.TAG }}
+          docker tag eventhub-frontend:${{ steps.vars.outputs.TAG }} ${{ secrets.ECR_REGISTRY }}/eventhub-frontend:latest
+          docker push ${{ secrets.ECR_REGISTRY }}/eventhub-frontend:${{ steps.vars.outputs.TAG }}
+          docker push ${{ secrets.ECR_REGISTRY }}/eventhub-frontend:latest
+
+      - name: Build & Push Backend
+        run: |
+          docker build -t eventhub-backend:${{ steps.vars.outputs.TAG }} ./backend
+          docker tag eventhub-backend:${{ steps.vars.outputs.TAG }} ${{ secrets.ECR_REGISTRY }}/eventhub-backend:${{ steps.vars.outputs.TAG }}
+          docker tag eventhub-backend:${{ steps.vars.outputs.TAG }} ${{ secrets.ECR_REGISTRY }}/eventhub-backend:latest
+          docker push ${{ secrets.ECR_REGISTRY }}/eventhub-backend:${{ steps.vars.outputs.TAG }}
+          docker push ${{ secrets.ECR_REGISTRY }}/eventhub-backend:latest
+
+      - name: Deploy on EC2 (update containers)
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/eventhub-ai
+            echo "ECR_REGISTRY=${{ secrets.ECR_REGISTRY }}" > .env
+            echo "TAG=${{ steps.vars.outputs.TAG }}" >> .env
+            docker compose down
+            docker compose pull
+            docker compose up -d

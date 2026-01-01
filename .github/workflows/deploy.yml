@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout source code
         uses: actions/checkout@v3
 
       - name: Configure AWS Credentials
@@ -19,7 +19,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Login to ECR
+      - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Set image tag
@@ -42,7 +42,7 @@ jobs:
           docker push ${{ secrets.ECR_REGISTRY }}/eventhub-backend:${{ steps.vars.outputs.TAG }}
           docker push ${{ secrets.ECR_REGISTRY }}/eventhub-backend:latest
 
-      - name: Deploy on EC2 (update containers)
+      - name: Deploy on EC2
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -52,6 +52,7 @@ jobs:
             cd ~/eventhub-ai
             echo "ECR_REGISTRY=${{ secrets.ECR_REGISTRY }}" > .env
             echo "TAG=${{ steps.vars.outputs.TAG }}" >> .env
-            docker compose down
+            docker compose down || true
+            docker rmi $(docker images -q) || true
             docker compose pull
             docker compose up -d
